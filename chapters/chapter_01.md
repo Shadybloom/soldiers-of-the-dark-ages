@@ -683,4 +683,4 @@
 ## Ссылки
 
 Дополнительные материалы:  
-[Военная экономика Эквестрии](ссылка_на_исследование)
+[Военная экономика Эквестрии](https://github.com/Shadybloom/soldiers-of-the-dark-ages/blob/master/research/equestria_war_economy.md)
