@@ -487,4 +487,4 @@
 ## Ссылки
 
 Дополнительные материалы:  
-[Армия Эквестрии: состав, вооружение, стратегия](ссылка на исследование)
+[Армия Эквестрии: состав, вооружение, стратегия](https://github.com/Shadybloom/soldiers-of-the-dark-ages/blob/master/research/equestria_army_structure.md)
