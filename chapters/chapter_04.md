@@ -823,4 +823,4 @@
 ## Ссылки
 
 Дополнительные материалы:  
-[Штурмовые инженеры: задачи, тактика, вооружение](ссылка на исследование)
+[Штурмовые инженеры: задачи, тактика, вооружение](https://github.com/Shadybloom/soldiers-of-the-dark-ages/blob/master/research/equestria_assault_engineers.md)
