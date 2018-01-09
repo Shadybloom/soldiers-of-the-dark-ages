@@ -10,14 +10,14 @@ import re
 
 # Примеры
 # Взлёт пегаса с автопилотом:
-# python aerodynamic-calculator.py Пегас
+# python pegasus-flight-simulation.py Пегас
 # Взлёт пегаса с полезной нагрузкой:
-# python aerodynamic-calculator.py Пегас -w 300
+# python pegasus-flight-simulation.py Пегас -w 300
 # Поиск оптимальной (по дальности) скорости и угла атаки:
-# python aerodynamic-calculator.py -m Пегас
-# python aerodynamic-calculator.py -m Тяжёлый планёр
+# python pegasus-flight-simulation.py -m Пегас
+# python pegasus-flight-simulation.py -m Тяжёлый планёр
 # Полёт пегаса с полезной нагрузкой в 300 килограмм, скоростью в 200 км/час и углом атаки в 15 градусов:
-# python aerodynamic-calculator.py -m Пегас -w 300 -s 200 -a 15
+# python pegasus-flight-simulation.py -m Пегас -w 300 -s 200 -a 15
 
 #-------------------------------------------------------------------------
 # Известные баги:
@@ -1026,7 +1026,7 @@ def f_acceleration_estimate (speed, distance):
     """Определяем необходимое ускорение по конечной скорости и дистанции
     
     Формула для определения пути без знания времени:
-    S = (V^2 - V0^2) / 2a
+    S = (V ** 2 - V0 ** 2) / 2 * a
     Где:
     S - расстояние
     V - скорость
