@@ -614,6 +614,27 @@ def f_triangle (side_b, angle_a, angle_b):
     side_a = abs(side_b * math.sin(math.radians(angle_a))) / math.sin(math.radians(angle_b))
     return side_a
 
+def f_projection_square(angle):
+    """Площадь проекции летательного аппарата.
+
+    Летательный аппарат представляется как цилиндр с крыльями.
+    По теореме синусов находится удлинение сторон, вычисляется площадь.
+    При угле 0° это фронтальная площадь, при угле 90° горизонтальная.
+    """
+    if WINGSPAN * f_triangle(WING_WIDTH, angle, 90) > WING_FRONT_SQUARE:
+        # Для многопланов первое крыло при сваливании пробивает в воздухе туннель.
+        wing_square = WINGSPAN * f_triangle(WING_WIDTH, angle, 90)
+        test_body_square = BODY_WIDTH * f_triangle(BODY_LENGTH, angle, 90)
+        if test_body_square > BODY_FRONT_SQUARE:
+            body_square = test_body_square
+        else:
+            body_square = BODY_FRONT_SQUARE
+    else:
+        wing_square = WING_FRONT_SQUARE
+        body_square = BODY_FRONT_SQUARE
+    total_square = wing_square + body_square
+    return wing_square, body_square, total_square
+
 def f_drag_force (aerodynamic_coefficient, air_density, velocity, aerodynamic_square):
     """Аэродинамическое сопротивление.
 
@@ -680,15 +701,7 @@ def f_aerodynamic (angle_of_attack):
     2) Коэффициенты подъёмной силы и сопротивления крыла берутся из поляры.
     2) Коэффициент индуктивного сопротивления зависит от размаха и площади крыла.
     """
-    # Фронтальная проекция зависит от угла атаки:
-    if f_triangle(WING_WIDTH, angle_of_attack, 90) > WING_THICKNESS:
-        wing_front_square = WINGSPAN * f_triangle(WING_WIDTH, angle_of_attack, 90)
-        body_front_square = BODY_FRONT_SQUARE + BODY_WIDTH * f_triangle(BODY_LENGTH, angle_of_attack, 90)
-    else:
-        wing_front_square = WINGSPAN * WING_THICKNESS
-        body_front_square = BODY_FRONT_SQUARE
-    # Вычисляем общую фронтальную поверхность:
-    total_front_square = wing_front_square + body_front_square
+    wing_front_square, body_front_square, total_front_square = f_projection_square(angle_of_attack)
     # Коэффициенты подъёмной силы и лобового сопротивления крыла берём из таблицы: 
     wing_lift_coefficient = d_polar.get(angle_of_attack)[0]
     wing_drag = d_polar.get(angle_of_attack)[1]
@@ -1449,16 +1462,6 @@ else:
 
 
 # Мимолётные вычисления:
-# Площадь горизонтальной проекции в зависимости от угла атаки.
-#angle = 45
-#body_bottom_square = BODY_WIDTH * f_triangle(BODY_LENGTH, (90-angle), 90)
-#wing_bottom_square = WINGSPAN * f_triangle(WING_WIDTH, (90-angle), 90)
-#print(body_bottom_square / (BODY_WIDTH * BODY_LENGTH))
-#print(wing_bottom_square / WING_SQUARE)
-# А что делать с коэффициентом аэродинамики?
-# С фюзеляжем мы можем менять его от фронтального к цилиндру, в зависиомти от угла атаки.
-# А с крылом всё несколько сложнее. Будем опираться на таблицу для NACA 0012.
-
 #print(f_reynolds_number(100/3.6,0.35))
 #print(f_reynolds_number(200/3.6,0.35))
 
