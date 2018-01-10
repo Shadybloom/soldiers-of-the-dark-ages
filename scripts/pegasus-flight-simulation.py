@@ -40,6 +40,8 @@ AIR_HEAT_CAPACITY = 1.006
 AIR_HEAT_CAPACITY_RATIO = 1.4
 # Молярная масса воздуха, кг/моль (зависит от состава атмосферы)
 AIR_MOLAR_MASS = 0.029
+# Динамическая вязкость воздуха в Па*с (зависит от температуры)
+AIR_DYNAMIC_VISCOSITY = 0.000018
 # Атмосферное давление в Паскалях (зависит от высоты и температуры)
 ATMOSPHERIC_PRESSURE = 101325
 # Источник пегасьей энергии в МДж/м³ (концентрация частиц должна падать с высотой)
@@ -71,7 +73,7 @@ PERIOD_SECOND = 60
 # Коэффициент трения качения (пневматические шины по асфальту):
 ROLLING_RESISTANCE_COEFFICIENT = 0.01
 # Длина взлётно-посадочной полосы в метрах:
-RUNWAY_LENGTH = 100
+RUNWAY_LENGTH = 300
 
 #-------------------------------------------------------------------------
 # Летательные аппараты:
@@ -578,6 +580,23 @@ def f_drag_force (aerodynamic_coefficient, air_density, velocity, aerodynamic_sq
     drag_force = aerodynamic_coefficient * ((air_density * velocity ** 2) / 2) * aerodynamic_square
     return drag_force
 
+def f_reynolds_number (aircraft_speed, wingspan):
+    """Число Рейнольдса. Если оно меньше критического - течение ламинарное.
+    
+    Формула:
+    Re = (V * L) / (n / p)
+    Где:
+    V - скрость м/с
+    L - хорда крыла
+    n - динамическая вязкость воздуха (0.000018 Па*с при 20 °C)
+    p - плотность воздуха (1.2 на уровне земли)
+    Пример:
+    ((100/3.6) * 0.35) / (0.000018 / 1.2) = 648 148
+    """
+    air_kinematic_viscosity = AIR_DYNAMIC_VISCOSITY / AIR_DENSITY
+    reynolds_number = (aircraft_speed * wingspan) / air_kinematic_viscosity
+    return reynolds_number
+
 def f_wing_aspect_ratio (wingspan, wing_square):
     """Геометрическое удлинение крыла.
     
@@ -999,7 +1018,7 @@ def f_glide_model (aircraft_mass, aircraft_speed=0, angle_of_attack=0, altitude=
         # Данные сохраняются для вывода:
         speed_kilometre_hour = aircraft_speed * 3.6
         if silent is not True:
-            print(round(aircraft_speed),round(path),round(altitude))
+            print(round(aircraft_speed),round(path),round(altitude),round(engine_required_energy * 1000), 'kWt')
         d_flight[second] = (speed_kilometre_hour, drag_force, lift_force_kilogram,
                 second, path, altitude)
     # В вывод идут данные цикла до момента сваливания.
@@ -1070,17 +1089,17 @@ def f_autopilot_takeoff (d_glide, d_LD_ratio, aircraft_mass, energy_balance):
     elif required_thrust > optimum_trust:
         engine_thrust, engine_required_energy, engine_overheating, engine_mode = \
                 f_engine_mode_choice (required_thrust, engine_air_volume)
-        print(engine_mode)
+        #print(engine_mode)
         return optimum_angle, engine_thrust, engine_required_energy
     # Если длина взлётной полосы недостаточна, увеличиваем тягу:
     elif required_thrust < optimum_trust:
         required_thrust = optimum_trust
         engine_thrust, engine_required_energy, engine_overheating, engine_mode = \
                 f_engine_mode_choice (required_thrust, engine_air_volume)
-        print(engine_mode)
+        #print(engine_mode)
         return optimum_angle, engine_thrust, engine_required_energy
     else:
-        print('Что-то пошло не так. f_autopilot_takeoff:')
+        #print('Что-то пошло не так. f_autopilot_takeoff:')
         return optimum_angle, 0, 0
 
 def f_pegasus_mind (d_glide, d_LD_ratio, aircraft_mass, energy_balance):
@@ -1106,10 +1125,10 @@ def f_pegasus_mind (d_glide, d_LD_ratio, aircraft_mass, energy_balance):
             required_thrust = (aircraft_mass * GRAVITATIONAL_ACCELERATION) / d_LD_ratio[optimum_angle]
             engine_thrust, engine_required_energy, engine_overheating, engine_mode = \
                     f_engine_mode_choice (required_thrust, engine_air_volume)
-            print(engine_mode)
+            #print(engine_mode)
             return optimum_angle, engine_thrust, engine_required_energy
         if aircraft_speed >= optimum_speed:
-            print('off')
+            #print('off')
             return optimum_angle, 0, 0
     elif 0 < altitude < 1000 and climb_speed < 0:
     # Боремся со сваливанием:
@@ -1118,14 +1137,14 @@ def f_pegasus_mind (d_glide, d_LD_ratio, aircraft_mass, energy_balance):
     # Сопротивление воздуха учитывается только для фронтальной проекции.
         optimum_angle = max(d_LD_ratio.keys(), key=(lambda k: d_LD_ratio[k]))
         engine_mode = 'maximal'
-        print(engine_mode, climb_speed)
+        #print(engine_mode, climb_speed)
         engine_thrust, engine_required_energy, engine_overheating = \
                 f_engine_control(engine_mode, START_AIR_VOLUME)
         return optimum_angle, engine_thrust, engine_required_energy
 
     # Планирование:
     elif altitude > 1000:
-        print('off')
+        #print('off')
         optimum_angle = max(d_LD_ratio.keys(), key=(lambda k: d_LD_ratio[k]))
         return optimum_angle, 0, 0
 
@@ -1361,7 +1380,7 @@ else:
     # А вообще, здесь надо бы поставить ускорение и длину взлётной полосы.
     #aircraft_speed = aircraft_acceleration
     # Пегас взлетает и падает:
-    print('Скорость (м/с), путь, высота')
+    print('Скорость (м/с), путь, высота, мощность (кВт)')
     glide_output = f_glide_model(aircraft_mass, aircraft_speed, angle_of_attack)
     ## Избавлемся от чисел после запятой:
     glide_output = [round(i) for i in glide_output]
@@ -1370,8 +1389,10 @@ else:
     print('Время, путь, высота')
     print(glide_output[3:8])
 
-    #f_glide_model(aircraft_mass, 0, angle_of_attack)
+# Мимолётные вычисления:
+#print(f_reynolds_number(100/3.6,0.35))
+#print(f_reynolds_number(200/3.6,0.35))
 
-    #print(f_engine(1.4, WORKING_MASS_ENERGY_MJ))
-    #print(f_engine(2.8, WORKING_MASS_ENERGY_MJ))
-    #print(f_engine(4.62, WORKING_MASS_ENERGY_MJ))
+#print(f_engine(1.4, WORKING_MASS_ENERGY_MJ))
+#print(f_engine(2.8, WORKING_MASS_ENERGY_MJ))
+#print(f_engine(4.62, WORKING_MASS_ENERGY_MJ))
