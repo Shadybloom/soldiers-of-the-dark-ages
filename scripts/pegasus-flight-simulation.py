@@ -23,8 +23,7 @@ import re
 # Известные баги:
 
 # * Автопилот тупой как пробка. Взлетать умеет, но после взлёта угол атаки не меняет.
-# * Сваливание. Сопротивление воздуха не учитывается (нужно ещё одну проекцию считать).
-# * Для пикирования, впрочем, тоже. Хотя здесь проще подправить.
+# * Оптимальный угол атаки и скорость высчитывается тупым перебором, а можно парой формул.
 
 #-------------------------------------------------------------------------
 # Общие переменные:
@@ -71,7 +70,7 @@ MAX_SPEED = 500
 # Аэродинамический коэффициент, актуален для сваливания и критических углов атаки (>30°):
 HORIZONTAL_BODY_DRAG_COEFFICIENT = 0.74 # Цилиндр с длиной/диаметром = 5/1 поперёк потока
 # Число секундных циклов модели
-PERIOD_SECOND = 60
+MAXIMUM_SECOND = 360
 # Коэффициент трения качения (пневматические шины по асфальту):
 ROLLING_RESISTANCE_COEFFICIENT = 0.01
 # Длина взлётно-посадочной полосы в метрах:
@@ -1027,7 +1026,7 @@ def f_glide_model (aircraft_mass, aircraft_speed=0, angle_of_attack=0, altitude=
             }
     energy_balance = ENERGY_BALANCE_MJ
     # Пока что считаем цикл по секундам, а надо бы по доступной энергии, скорости и высоте:
-    while d_glide['second'] < PERIOD_SECOND:
+    while d_glide['second'] < MAXIMUM_SECOND:
         # Берём данные из словаря:
         second = d_glide['second']
         aircraft_speed = d_glide['aircraft_speed']
@@ -1038,18 +1037,36 @@ def f_glide_model (aircraft_mass, aircraft_speed=0, angle_of_attack=0, altitude=
         optimum_angle, engine_thrust, engine_required_energy = \
                 f_pegasus_mind(d_glide, d_LD_ratio, aircraft_mass, energy_balance)
         #print(optimum_angle,engine_thrust,engine_required_energy)
-        # Алсо, фронтальную поверхность крыльев тоже нужно занести в словарь (или сразу airflow):
+        # Данные по фронтальной проекции:
         total_front_square, wing_front_square, \
                 wing_lift_coefficient, total_drag = f_aerodynamic(optimum_angle)
+        # Данные по горизонтальной проекции:
+        # Проблема, в пикировании эта проекция становится фронтальной.
+        horizontal_projection_angle = f_take_closest(90 - optimum_angle, d_polar.keys())
+        total_bottom_square, wing_bottom_square, \
+                wing_bottom_lift_coefficient, total_bottom_drag = \
+                f_aerodynamic(horizontal_projection_angle)
+        #print(horizontal_projection_angle,total_bottom_drag,wing_bottom_square,
+        #        wing_bottom_lift_coefficient,total_bottom_drag)
         # Вычисляем секундное ускорение:
         jet_acceleration = engine_thrust / aircraft_mass
         aircraft_speed = aircraft_speed + jet_acceleration
         # Вычисляем объём рабочего вещества для ВРД:
         engine_air_volume = f_airflow(aircraft_speed, wing_front_square)
-        # Считаем подъёмную силу и лобовое сопротивление:
+        # Считаем подъёмную силу и сопротивление воздуха:
         drag_force = f_drag_force(total_drag,AIR_DENSITY,aircraft_speed,total_front_square)
         lift_force = f_drag_force(wing_lift_coefficient,AIR_DENSITY,aircraft_speed,WING_SQUARE)
         lift_force_kilogram = lift_force / GRAVITATIONAL_ACCELERATION
+        # Сопротивление воздуха замедляет сваливание и набор высоты:
+        horizontal_drag_force = f_drag_force(total_bottom_drag,AIR_DENSITY,climb_speed,total_bottom_square)
+        if climb_speed != 0:
+            horizontal_drag_deceleration = horizontal_drag_force / aircraft_mass
+            if climb_speed > 0:
+                climb_speed = climb_speed - horizontal_drag_deceleration
+            else:
+                climb_speed = climb_speed + horizontal_drag_deceleration
+            # Крылья отлично держат пегаса, не хуже чем вингсьют.
+            print(climb_speed, horizontal_drag_deceleration, horizontal_drag_force)
         # Качение по земле:
         if altitude == 0 and climb_speed == 0 and lift_force < grav_force:
             aircraft_speed = f_rolling(grav_force, lift_force, drag_force,
