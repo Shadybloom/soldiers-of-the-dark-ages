@@ -589,6 +589,10 @@ def key_search (search_string, dict, silent=True):
 #-------------------------------------------------------------------------
 # Функции скрипта:
 
+def f_take_closest(number,collection):
+    """Поиск ближайшего числа в списке"""
+    return min(collection,key=lambda x:abs(x-number))
+
 def f_triangle (side_b, angle_a, angle_b):
     """Сторона треугольника по двум углам и другой стороне.
 
@@ -631,9 +635,9 @@ def f_body_drag (angle_of_attack):
     Коэффициент равен фронтальному при угле атаки до ±20°
     Но при закритических углах растёт, пока не достигнет предела на 90°
     """
-    horizonal_body_square = BODY_LENGTH * BODY_WIDTH
     angle_body_square = \
             f_projection_square(angle_of_attack)[1]
+    horizonal_body_square = BODY_BOTTOM_SQUARE
     body_square_percent = angle_body_square / horizonal_body_square
     body_drag = HORIZONTAL_BODY_DRAG_COEFFICIENT * body_square_percent
     if body_drag < FRONTAL_BODY_DRAG:
@@ -655,7 +659,7 @@ def f_drag_force (aerodynamic_coefficient, air_density, velocity, aerodynamic_sq
     return drag_force
 
 def f_reynolds_number (aircraft_speed, wing_width):
-    """Число Рейнольдса. Если оно меньше критического - течение ламинарное.
+    """Число Рейнольдса. Под него выбираем поляру крыла.
     
     Формула:
     Re = (V * L) / (n / p)
@@ -718,7 +722,7 @@ def f_aerodynamic (angle_of_attack):
     # Коэффициенты подъёмной силы и лобового сопротивления крыла берём из таблицы: 
     wing_lift_coefficient = d_polar.get(angle_of_attack)[0]
     wing_drag_coefficient = d_polar.get(angle_of_attack)[1]
-    # Сопротивление фюзеляжа равно фронтальному, или приблизительно вычисляется для закритичных углов:
+    # Сопротивление фюзеляжа равно фронтальному, или приблизительно вычисляется для закритических углов:
     body_drag = f_body_drag(angle_of_attack)
     # Вычисляем общий коэффициент лобового сопротивления:
     wing_square_percent = wing_square / total_square
@@ -1416,8 +1420,7 @@ d_LD_ratio = f_lift_to_drag_ratio(d_polar)
 
 # Проверка, указан ли угол атаки:
 if namespace.angle:
-    angle_of_attack = key_search(str(namespace.angle), d_polar, silent=False)
-    angle_of_attack = float(angle_of_attack)
+    angle_of_attack = f_take_closest(namespace.angle, d_polar.keys())
     print('Выбрано:', angle_of_attack)
 else:
     # Если нет, мспользовать угол с минимальный лобовымм сопротивлением:
@@ -1499,10 +1502,10 @@ else:
     print('Время, путь, высота')
     print(glide_output[3:8])
 
+# Мимолётные вычисления:
 #print(f_aerodynamic(90))
  #aerodynamic_output = (total_front_square, wing_front_square, wing_lift_coefficient, total_drag)
 
-# Мимолётные вычисления:
 #print(f_reynolds_number(100/3.6,0.35))
 #print(f_reynolds_number(200/3.6,0.35))
 
