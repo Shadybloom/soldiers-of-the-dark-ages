@@ -22,11 +22,8 @@ import re
 #-------------------------------------------------------------------------
 # Известные баги:
 
-# * Объекты для 20 килограмм летят куда-то совсем не туда. И кот знает почему.
-# * Если несколько раз подряд резко меняется угол атаки пегаса начинает бросать на километры вверх и вниз.
+# * Объекты до 20 килограмм летят куда-то совсем не туда. И кот знает почему.
 # * С пикированием проблемы. Скорость падает, потому что площадь фронтальной проекции растёт.
-# * Автопилот тупой как пробка. Взлетать умеет, может поддерживать высоту, но маневрировать -- уже нет.
-# * Ещё он не слушается команд -s и -a, только по -w можно вес корректировать.
 # * Оптимальный угол атаки и скорость высчитывается тупым перебором, а можно парой формул.
 # * А к тому же по -m вызывается старая, глупая модель, которая умеет только в прямолинейный полёт.
 
@@ -72,8 +69,10 @@ START_AIR_VOLUME = 4.4
 AIRFLOW_EFFICIENCY = 0.5
 # Предельная скорость модели
 MAX_SPEED = 500
-# До какой высоты подниматься автопилоту:
-MAX_ALTITUDE = 1000
+# После набора этой высоты автопилот исполняет команды -a и -s:
+MIN_ALTITUDE = 500
+# Предельная высота полёта:
+MAX_ALTITUDE = 5000
 # Число циклов модели
 MAX_SECONDS = 86400
 # Аэродинамический коэффициент, актуален для сваливания и критических углов атаки (>30°):
@@ -987,9 +986,14 @@ def f_climbing (engine_thrust, d_plane, d_flight):
         if climb_speed > 0:
             # Скорость плюсовая, набор высоты и замедление:
             climb_speed = climb_speed + horizontal_drag_deceleration
+            # Костыли-костылики. Но кот знает, как иначе этот маятник исправить:
+            if climb_speed < 0:
+                climb_speed = 0
         else:
             # Скорость минусовая, сваливание и замедление сваливания:
             climb_speed = climb_speed - horizontal_drag_deceleration
+            if climb_speed > 0:
+                climb_speed = 0
         # Также на высоту работает направление вектора скорости:
         climb_rate = climb_speed + \
                 f_triangle(aircraft_speed, d_flight['angle_of_attack'], 90)
@@ -1047,9 +1051,13 @@ def f_gliding (engine_thrust, d_plane, d_flight):
         if climb_speed > 0:
             # Скорость плюсовая, набор высоты и замедление:
             climb_speed = climb_speed + horizontal_drag_deceleration
+            if climb_speed < 0:
+                climb_speed = 0
         else:
             # Скорость минусовая, сваливание и замедление сваливания:
             climb_speed = climb_speed - horizontal_drag_deceleration
+            if climb_speed > 0:
+                climb_speed = 0
         # Плата за планирование -- снижение под небольшим углом:
         descent_rate = climb_speed - f_triangle(aircraft_speed, angle_of_attack, 90)
         return aircraft_speed, climb_speed, descent_rate
@@ -1107,10 +1115,11 @@ def f_glide_model (d_flight, d_LD_ratio, silent=False, energy_collect=False):
     6) Модель работает с ограничением по времени или до приземления.
     """
     d_flight_log = {}
+    d_plane = f_create_dict_plane(d_flight['angle_of_attack'])
     while d_flight['altitude'] >=0 and d_flight['second'] <= MAX_SECONDS:
         # Автопилот выбирает угол атаки и режим двигателя:
         optimum_angle, engine_thrust, engine_required_energy = \
-                f_pegasus_mind(d_flight, d_LD_ratio)
+                f_pegasus_mind(d_flight, d_plane, d_LD_ratio)
         # Если энергия закончилась, никто никуда не летит:
         if d_flight['energy_balance'] < engine_required_energy:
             engine_required_energy = 0
@@ -1241,7 +1250,7 @@ def f_autopilot_takeoff (d_flight, d_LD_ratio, aircraft_mass, energy_balance):
         #print('Что-то пошло не так. f_autopilot_takeoff:')
         return optimum_angle, 0, 0
 
-def f_pegasus_mind (d_flight, d_LD_ratio):
+def f_pegasus_mind (d_flight, d_plane, d_LD_ratio):
     # Переписывай, словарик лучше кучи переменных. Записи лишь чуть длиннее, зато всё сгруппировано.
     # Потихоньку пишем пегасий ИИ. Он должен передавать команды крыльям и движку.
     energy_balance = d_flight['energy_balance']
@@ -1259,7 +1268,8 @@ def f_pegasus_mind (d_flight, d_LD_ratio):
                 f_autopilot_takeoff(d_flight, d_LD_ratio, aircraft_mass, energy_balance)
         return optimum_angle, engine_thrust, engine_required_energy
     # Полёт с набором высоты:
-    elif 0 < altitude < MAX_ALTITUDE / 2 and climb_speed > 0:
+    elif 0 < altitude < MIN_ALTITUDE \
+            and d_flight['energy_balance'] > ENERGY_BALANCE_MJ / 10:
         # А вот и нет, здесь оптимальный угол уже ищется по лобовому сопротивлению.
         # Но сразу не выбирается, чтобы подъёмная сила не упала.
         optimum_angle = max(d_LD_ratio.keys(), key=(lambda k: d_LD_ratio[k]))
@@ -1273,10 +1283,13 @@ def f_pegasus_mind (d_flight, d_LD_ratio):
         if aircraft_speed >= optimum_speed:
             #print('off')
             return optimum_angle, 0, 0
-    # Набор скорости:
-    elif 100 < altitude < MAX_ALTITUDE:
-        # Угол с минимальным лобовым сопротивлением крыла:
-        optimum_angle = min(d_polar.keys(), key=(lambda k: d_polar[k][1]))
+    # Набор скорости и безумные эксперименты:
+    elif MIN_ALTITUDE < altitude < MAX_ALTITUDE \
+            and d_flight['energy_balance'] > ENERGY_BALANCE_MJ / 10:
+        if fixed_angle:
+            optimum_angle = fixed_angle
+        else:
+            optimum_angle = max(d_LD_ratio.keys(), key=(lambda k: d_LD_ratio[k]))
         optimum_speed = f_find_optimum_speed_for_angle(aircraft_mass, optimum_angle)
         if aircraft_speed < optimum_speed:
             required_thrust = (aircraft_mass * GRAVITATIONAL_ACCELERATION) / d_LD_ratio[optimum_angle]
@@ -1284,13 +1297,20 @@ def f_pegasus_mind (d_flight, d_LD_ratio):
                     f_engine_mode_choice (required_thrust, engine_air_volume)
             #print(engine_mode)
             return optimum_angle, engine_thrust, engine_required_energy
-        if aircraft_speed >= optimum_speed:
+        elif fixed_speed and aircraft_speed < fixed_speed:
+            required_thrust = f_drag_force(
+            d_plane['total_front_drag'], AIR_DENSITY,
+            fixed_speed, d_plane['total_front_square'])
+            engine_thrust, engine_required_energy, engine_overheating, engine_mode = \
+                    f_engine_mode_choice (required_thrust, engine_air_volume)
+            return optimum_angle, engine_thrust, engine_required_energy
+        elif aircraft_speed >= optimum_speed:
             #print('off')
             return optimum_angle, 0, 0
     # Планирование
-    #elif altitude > 1000:
-    #    optimum_angle = f_take_closest(-3, d_polar.keys())
-    #    return optimum_angle, 0, 0
+    elif d_flight['energy_balance'] < ENERGY_BALANCE_MJ / 10:
+        optimum_angle = f_take_closest(-5, d_polar.keys())
+        return optimum_angle, 0, 0
     else:
         optimum_angle = f_take_closest(-3, d_polar.keys())
         #print('Автопилот не умеет летать.')
@@ -1481,10 +1501,12 @@ d_LD_ratio = f_lift_to_drag_ratio(d_polar)
 # Проверка, указан ли угол атаки:
 if namespace.angle:
     angle_of_attack = f_take_closest(namespace.angle, d_polar.keys())
+    fixed_angle = angle_of_attack
     print('Выбрано:', angle_of_attack)
 else:
     # Если нет, использовать угол с минимальный лобовым сопротивлением:
     angle_of_attack = min(d_polar.keys(), key=(lambda k: d_polar[k][1]))
+    fixed_angle = None
 
 # Проверка, указан ли вес груза:
 if namespace.weight:
@@ -1494,9 +1516,11 @@ else:
 
 # Проверка, указана ли скорость:
 if namespace.speed:
-    aircraft_speed = namespace.speed
+    aircraft_speed = namespace.speed / 3.6
+    fixed_speed = namespace.speed / 3.6
 else:
     aircraft_speed = 0
+    fixed_speed = None
 
 # Исходные данные для функции полёта:
 d_flight = {
@@ -1515,17 +1539,17 @@ d_flight = {
 # Тело программы:
 
 # Проверка, указана ли постоянная скорость:
-if namespace.speed:
-    # Если да, смотрим, насколько она реальна:
-    print('Полёт с постоянной скоростью')
-    flight_output = f_flight_model(namespace.speed)
-    print('Скорость (км/час), лобовое сопротивление (ньютонов), подъёмная сила (кгс)')
-    print(flight_output[0:3])
-    print('Время, путь, высота, циклы двигателя, между циклами (секунд)')
-    print(flight_output[3:8])
-elif namespace.model is True:
-    # Если нет, проверяем все варианты и выбираем оптимальный по дальности:
-    if namespace.angle is None:
+
+if namespace.model is True:
+    if namespace.speed:
+        # Если да, смотрим, насколько она реальна:
+        print('Полёт с постоянной скоростью')
+        flight_output = f_flight_model(namespace.speed)
+        print('Скорость (км/час), лобовое сопротивление (ньютонов), подъёмная сила (кгс)')
+        print(flight_output[0:3])
+        print('Время, путь, высота, циклы двигателя, между циклами (секунд)')
+        print(flight_output[3:8])
+    elif namespace.angle is None:
         d_flight_angles = {}
         for key in d_polar:
             if key > 0:
