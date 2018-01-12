@@ -2,10 +2,11 @@
 # -*- coding: utf-8 -*-
 
 # Скрипт преобразует аэродинамические параметры крыла из формата csv в питоновский словарь:
-
-# ./wordfreq-morph.py ./text-file.txt | xclip -i
+# ./polar_csv_to_dict.py ./polar.csv
+# ./polar_csv_to_dict.py ./polar.csv | xclip -i
 
 # Пример поляры:
+# http://airfoiltools.com/images/airfoil/goe796-il_l.png
 # http://airfoiltools.com/polar/details?polar=xf-goe796-il-1000000-n5
 # http://airfoiltools.com/polar/csv?polar=xf-goe796-il-1000000-n5
 
@@ -38,7 +39,7 @@ file_patch = ' '.join(namespace.file)
 if namespace.file is not None and os.path.exists(file_patch):
     with open(file_patch) as file:
         #Ищем строку в файле
-        print("        'Поляра (целиком)':{")
+        print("        'Поляра профиля крыла':{")
         for line in file:
             found_head = re.match('^[^-0-9]', line)
             if found_head:
@@ -53,6 +54,6 @@ if namespace.file is not None and os.path.exists(file_patch):
                 line = line + '),'
                 line = '            ' + line
                 print(line)
-        print("        },")
+        print("            },")
 else:
     print('Файл не найден:',file_patch)
