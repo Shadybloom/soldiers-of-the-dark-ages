@@ -9,9 +9,9 @@ import re
 # В соотвествии с законами механики и аэродинамики, в условиях земноподобной планеты.
 
 # Примеры
-# Взлёт пегаса с автопилотом:
+# Полёт пегаса с автопилотом:
 # python pegasus-flight-simulation.py Пегас
-# Взлёт пегаса с полезной нагрузкой:
+# Полёт пегаса с полезной нагрузкой:
 # python pegasus-flight-simulation.py Пегас -w 300
 # Поиск оптимальной (по дальности) скорости и угла атаки:
 # python pegasus-flight-simulation.py -m Пегас
@@ -22,8 +22,13 @@ import re
 #-------------------------------------------------------------------------
 # Известные баги:
 
-# * Автопилот тупой как пробка. Взлетать умеет, но после взлёта угол атаки не меняет.
+# * Объекты для 20 килограмм летят куда-то совсем не туда. И кот знает почему.
+# * Если несколько раз подряд резко меняется угол атаки пегаса начинает бросать на километры вверх и вниз.
+# * С пикированием проблемы. Скорость падает, потому что площадь фронтальной проекции растёт.
+# * Автопилот тупой как пробка. Взлетать умеет, может поддерживать высоту, но маневрировать -- уже нет.
+# * Ещё он не слушается команд -s и -a, только по -w можно вес корректировать.
 # * Оптимальный угол атаки и скорость высчитывается тупым перебором, а можно парой формул.
+# * А к тому же по -m вызывается старая, глупая модель, которая умеет только в прямолинейный полёт.
 
 #-------------------------------------------------------------------------
 # Общие переменные:
@@ -67,10 +72,12 @@ START_AIR_VOLUME = 4.4
 AIRFLOW_EFFICIENCY = 0.5
 # Предельная скорость модели
 MAX_SPEED = 500
+# До какой высоты подниматься автопилоту:
+MAX_ALTITUDE = 1000
+# Число циклов модели
+MAX_SECONDS = 86400
 # Аэродинамический коэффициент, актуален для сваливания и критических углов атаки (>30°):
 HORIZONTAL_BODY_DRAG_COEFFICIENT = 0.74 # Цилиндр с длиной/диаметром = 5/1 поперёк потока
-# Число секундных циклов модели
-MAXIMUM_SECOND = 360
 # Коэффициент трения качения (пневматические шины по асфальту):
 ROLLING_RESISTANCE_COEFFICIENT = 0.01
 # Длина взлётно-посадочной полосы в метрах:
@@ -739,6 +746,22 @@ def f_aerodynamic (angle_of_attack):
     aerodynamic_output = (total_square, wing_square, wing_lift_coefficient, total_drag)
     return aerodynamic_output
 
+def f_create_dict_plane (angle_of_attack):
+    """Аэродинамические показатели для фронтальной и горизонтальной проекции."""
+    frontal_aerodynamics = f_aerodynamic(angle_of_attack)
+    horizontal_projection_angle = f_take_closest(90 - angle_of_attack, d_polar.keys())
+    horizonal_aerodynamics = f_aerodynamic(horizontal_projection_angle)
+    d_plane = {
+            'total_front_square':frontal_aerodynamics[0],
+            'wing_front_square':frontal_aerodynamics[1],
+            'wing_lift_coefficient':frontal_aerodynamics[2],
+            'total_front_drag':frontal_aerodynamics[3],
+            'total_bottom_square':horizonal_aerodynamics[0],
+            'wing_bottom_square':horizonal_aerodynamics[1],
+            'total_bottom_drag':horizonal_aerodynamics[3],
+            }
+    return d_plane
+
 def f_heated_gas_pressure (heat):
     """Уравнение состояния идеального газа.
     
@@ -868,8 +891,7 @@ def f_engine_mode_choice (required_thrust, engine_air_volume):
         optimal_mode = engine_thrust, engine_required_energy, engine_overheating, mode
     return optimal_mode
 
-def f_rolling (grav_force, lift_force, drag_force,
-        aircraft_mass, aircraft_speed):
+def f_rolling (engine_thrust, d_plane, d_flight):
     """Качение по взлётной полосе.
 
     Подъёмной силы недостаточно для взлёта, хотя вес и уменьшается.
@@ -881,94 +903,104 @@ def f_rolling (grav_force, lift_force, drag_force,
     kтр- коэффициент трения
     Fn - прижимающая сила
     r - радиус колеса."""
-    # По взлётной полосе пони может бежать со скоростью в 10 м/с
-    # Но в данном случаем мы попросту катимся на колёсиках.
-    if lift_force > 0:
-        normal_force = grav_force - lift_force
-    else:
-        normal_force = grav_force + abs(lift_force)
-    # Замедление из-за аэродинамического сопротивления:
-    drag_deceleration = drag_force / aircraft_mass
+    # Ускоряем самолёт:
+    jet_acceleration = engine_thrust / d_flight['aircraft_mass']
+    aircraft_speed = d_flight['aircraft_speed'] + jet_acceleration
+    # Система сил (полезные с плюсами, противостоящие с минусами):
+    jet_force = engine_thrust
+    drag_force = -(f_drag_force(
+            d_plane['total_front_drag'], AIR_DENSITY,
+            aircraft_speed, d_plane['total_front_square']
+            ))
+    lift_force = f_drag_force(
+            d_plane['wing_lift_coefficient'], AIR_DENSITY,
+            aircraft_speed, WING_SQUARE
+            )
+    grav_force = -(d_flight['aircraft_mass'] * GRAVITATIONAL_ACCELERATION)
+    # Прижимающая сила:
+    normal_force = grav_force + lift_force
     # Работает сила трения качения (поскольку копыта считать лень):
     friction_force = ROLLING_RESISTANCE_COEFFICIENT * \
             (normal_force / WHEEL_RADIUS)
-    #print(drag_force, friction_force)
-    friction_deceleration = friction_force / aircraft_mass
-    rolling_deceleration = drag_deceleration + friction_deceleration
-    aircraft_speed = aircraft_speed - rolling_deceleration
-    return aircraft_speed
+    # Качение по взлётной полосе:
+    if jet_force >= 0 \
+            and drag_force <= 0 \
+            and friction_force <= 0 \
+            and lift_force < abs(grav_force):
+        drag_deceleration = drag_force / aircraft_mass
+        friction_deceleration = friction_force / aircraft_mass
+        # Замедляем самолёт:
+        aircraft_speed = aircraft_speed + friction_deceleration + drag_deceleration
+        climb_speed = 0
+        climb_rate = 0
+        return aircraft_speed, climb_speed, climb_rate
+    # Отрыв от земли, Переход на функцию climbing:
+    elif jet_force >= 0 \
+            and drag_force <= 0 \
+            or friction_force >= 0 \
+            or lift_force > abs(grav_force):
+        return f_climbing(engine_thrust, d_plane, d_flight)
+    else:
+        print('Что-то пошло не так, f_rolling')
+        print(jet_force, drag_force, friction_force,
+                lift_force, normal_force, grav_force)
+        exit()
 
-def f_climbing (grav_force, lift_force, drag_force,
-        aircraft_mass, aircraft_speed, angle_of_attack, climb_speed):
+def f_climbing (engine_thrust, d_plane, d_flight):
     """Набор высоты за счёт подъёмной силы и угла вектора скорости.
     
-    Чем выше подъёмная сила, тем с большим ускорением пегаса тащит вверх.
+    Чем выше подъёмная сила, тем с большей скоростью пегаса тащит вверх.
     Также набранная высота повышается из-за вектора скорости к горизонту.
     """
-    drag_deceleration = drag_force / aircraft_mass
-    aircraft_speed = aircraft_speed - drag_deceleration
-    # Подъёмная сила выше силы притяжения, крыло тащит пегаса вверх:
-    climb_force = lift_force - grav_force
+    # Ускоряем самолёт:
+    jet_acceleration = engine_thrust / d_flight['aircraft_mass']
+    aircraft_speed = d_flight['aircraft_speed'] + jet_acceleration
+    # Система сил (полезные с плюсами, противостоящие с минусами):
+    jet_force = engine_thrust
+    drag_force = -(f_drag_force(
+            d_plane['total_front_drag'], AIR_DENSITY,
+            aircraft_speed, d_plane['total_front_square']
+            ))
+    lift_force = f_drag_force(
+            d_plane['wing_lift_coefficient'], AIR_DENSITY,
+            aircraft_speed, WING_SQUARE
+            )
+    grav_force = -(d_flight['aircraft_mass'] * GRAVITATIONAL_ACCELERATION)
+    # Подъёмная сила может быть как положительной так и отрицательной:
+    climb_force = lift_force + grav_force
     climb_acceleration = climb_force / aircraft_mass
-    climb_speed = climb_speed + climb_acceleration
-    # Также на высоту работает направление вектора скорости:
-    climb_rate = climb_speed + \
-            f_triangle(aircraft_speed, angle_of_attack, 90)
-    return aircraft_speed, climb_speed, climb_rate
+    climb_speed = d_flight['climb_speed'] + climb_acceleration
+    # Сопротивление воздуха мешает вертикальному подъёму или сваливанию:
+    horizontal_drag_force = -(f_drag_force(
+            d_plane['total_bottom_drag'], AIR_DENSITY,
+            climb_speed, d_plane['total_bottom_square']
+            ))
+    # Набор высоты:
+    if jet_force >= 0 \
+            and lift_force >= 0 \
+            and drag_force <= 0 \
+            and horizontal_drag_force <= 0:
+        drag_deceleration = drag_force / aircraft_mass
+        horizontal_drag_deceleration = horizontal_drag_force / aircraft_mass
+        # Замедляем самолёт:
+        aircraft_speed = aircraft_speed + drag_deceleration
+        if climb_speed > 0:
+            # Скорость плюсовая, набор высоты и замедление:
+            climb_speed = climb_speed + horizontal_drag_deceleration
+        else:
+            # Скорость минусовая, сваливание и замедление сваливания:
+            climb_speed = climb_speed - horizontal_drag_deceleration
+        # Также на высоту работает направление вектора скорости:
+        climb_rate = climb_speed + \
+                f_triangle(aircraft_speed, d_flight['angle_of_attack'], 90)
+        return aircraft_speed, climb_speed, climb_rate
+    else:
+        print('Что-то пошло не так, f_climbing')
+        print(jet_force, drag_force, horizontal_drag_force,
+                lift_force, grav_force)
+        exit()
 
-def f_descenting (grav_force, lift_force, drag_force,
-        aircraft_mass, aircraft_speed, angle_of_attack, climb_speed):
-    """Сваливание.
-    
-    Угол атаки положительный, но скорость подъёма падает,
-    Достигает нуля и переходит в скорость падения.
-    При этом скорсть падения -- векторная, минусовая величина.
-    """
-    # Ты не учитываешь сопротивление воздуха при падении.
-    # Средний пегас должен падать со скоростью в 190-240 км/час.
-    # При такой скорости лобовое сопротивление 213 ньютонов.
-
-    drag_deceleration = drag_force / aircraft_mass
-    aircraft_speed = aircraft_speed - drag_deceleration
-    descent_force = grav_force - lift_force
-    # Хм, нужно будет вычислить аэродинамику для проекции снизу.
-    # Можно исходить из коэффициента подъёмной силы крыла.
-    #print('lift_force',lift_force)
-
-    descent_acceleration = descent_force / aircraft_mass
-    # Потеря высоты из за нехватки подъёмной силы:
-    climb_speed = climb_speed - descent_acceleration
-    # Вектор скорости уменьшает потерю высоты:
-    climb_rate = climb_speed + \
-            f_triangle(aircraft_speed, angle_of_attack, 90)
-    return aircraft_speed, climb_speed, climb_rate
-
-def f_diving (grav_force, lift_force, drag_force,
-        aircraft_mass, aircraft_speed, angle_of_attack, climb_speed):
-    """Пикирование.
-
-    Угол атаки отрицательный, подъёмная сила превращается в силу антикрыла.
-    По этой же причине вектор прижимающей силы отклоняется вперёд.
-    Доля прижимающей силы (синус угла атаки) переходит в силу тяги.
-    Аппарат платит набранной высотой за быстрое повышение скорости.
-    """
-    descent_force = -grav_force + lift_force
-    descent_acceleration = descent_force / aircraft_mass
-    # Скорость снижения минусовая:
-    descent_speed = climb_speed + descent_acceleration
-    # Крыло скользит по воздуху под углом, поэтому вектор силы реакции опоры отклоняется вперёд.
-    # Часть силы притяжения и давления воздуха на крыло переходит в силу тяги:
-    incline_force = abs(descent_force * math.sin(math.radians(angle_of_attack)))
-    incline_force = incline_force - drag_force
-    incline_acceleration = incline_force / aircraft_mass
-    aircraft_speed = aircraft_speed + incline_acceleration
-    #print(descent_force,incline_force,descent_acceleration,incline_acceleration)
-    # Вектор скорости летательного аппарата направлен под углом к земле:
-    descent_rate = descent_speed + f_triangle(aircraft_speed, angle_of_attack, 90)
-    return aircraft_speed, descent_speed, descent_rate
-
-def f_gliding (grav_force, lift_force, drag_force,
-        aircraft_mass, aircraft_speed, angle_of_attack, climb_speed):
+def f_gliding (engine_thrust, d_plane, d_flight):
     """Планирование.
     
     Угол атаки отрицательный, но подъёмная сила поддерживает аппарат.
@@ -976,155 +1008,164 @@ def f_gliding (grav_force, lift_force, drag_force,
     Доля прижимающей силы (синус угла атаки) переходит в силу тяги.
     Аппарат компенсирует лобовое сопротивление за счёт медленного снижения.
     """
-    # На самом деле очень уродливая функция. Обязательно перепиши!
-    ## Подъёмная сила выше силы притяжения, крыло тащит пегаса вверх:
-    climb_force = lift_force - grav_force
-    climb_acceleration = climb_force / aircraft_mass
-    climb_speed = climb_speed + climb_acceleration
-    #print('nya', climb_force, climb_speed)
+    angle_of_attack = d_flight['angle_of_attack']
+    # Ускоряем самолёт:
+    jet_acceleration = engine_thrust / d_flight['aircraft_mass']
+    aircraft_speed = d_flight['aircraft_speed'] + jet_acceleration
+    # Система сил (полезные с плюсами, противостоящие с минусами):
+    jet_force = engine_thrust
+    drag_force = -(f_drag_force(
+            d_plane['total_front_drag'], AIR_DENSITY,
+            aircraft_speed, d_plane['total_front_square']
+            ))
+    lift_force = f_drag_force(
+            d_plane['wing_lift_coefficient'], AIR_DENSITY,
+            aircraft_speed, WING_SQUARE
+            )
+    grav_force = -(d_flight['aircraft_mass'] * GRAVITATIONAL_ACCELERATION)
     # Вектор прижимаюещей силы направлен вперёд, поэтому часть её переходит в тягу.
-    # Тяга незначительная, но всё же работает против сопротивления воздуха.
     incline_force = abs(grav_force * math.sin(math.radians(angle_of_attack)))
-    drag_force = drag_force - incline_force
-    # Так не бывает, но всё же учтём.
-    if drag_force < 0:
-        print('С профилем крыла что-то не так. f_gliding', drag_force)
-        incline_force = abs(drag_force)
+    # Подъёмная сила может быть как положительной так и отрицательной:
+    climb_force = lift_force + grav_force
+    climb_acceleration = climb_force / aircraft_mass
+    climb_speed = d_flight['climb_speed'] + climb_acceleration
+    # Сопротивление воздуха мешает вертикальному подъёму или сваливанию:
+    horizontal_drag_force = -(f_drag_force(
+            d_plane['total_bottom_drag'], AIR_DENSITY,
+            climb_speed, d_plane['total_bottom_square']
+            ))
+    # Планирование:
+    if jet_force >= 0 \
+            and incline_force >= 0 \
+            and drag_force <= 0 \
+            and horizontal_drag_force <= 0:
         incline_acceleration = incline_force / aircraft_mass
-        aircraft_speed = aircraft_speed + incline_acceleration
-    else:
         drag_deceleration = drag_force / aircraft_mass
-        aircraft_speed = aircraft_speed - drag_deceleration
-    # Плата за планирование -- снижение под небольшим углом:
-    descent_rate = f_triangle(aircraft_speed, angle_of_attack, 90)
-    if climb_speed > 0:
-        climb_rate = climb_speed - descent_rate
-        return aircraft_speed, climb_speed, climb_rate
-    else:
-        descent_rate = descent_rate + climb_speed
+        horizontal_drag_deceleration = horizontal_drag_force / aircraft_mass
+        # Замедляем самолёт, или ускоряем его:
+        aircraft_speed = aircraft_speed + incline_acceleration + drag_deceleration
+        if climb_speed > 0:
+            # Скорость плюсовая, набор высоты и замедление:
+            climb_speed = climb_speed + horizontal_drag_deceleration
+        else:
+            # Скорость минусовая, сваливание и замедление сваливания:
+            climb_speed = climb_speed - horizontal_drag_deceleration
+        # Плата за планирование -- снижение под небольшим углом:
+        descent_rate = climb_speed - f_triangle(aircraft_speed, angle_of_attack, 90)
         return aircraft_speed, climb_speed, descent_rate
+    # Пикирование:
+    #elif jet_force >= 0 \
+    #        and incline_force >= 0 \
+    #        and lift_force <= 0 \
+    #        and drag_force <= 0 \
+    #        and horizontal_drag_force <= 0:
+    #    pass
+    else:
+        print('Что-то пошло не так, f_gliding')
+        print(jet_force, incline_force, drag_force,
+                horizontal_drag_force, lift_force, grav_force)
+        exit()
 
-def f_glide_model (aircraft_mass, aircraft_speed=0, angle_of_attack=0, altitude=0, silent=False):
-    """Модель планирования."""
-    # Аэродинамические свойства зависят от угла атаки:
-    total_front_square, wing_front_square, \
-            wing_lift_coefficient, total_drag = f_aerodynamic(angle_of_attack)
-    grav_force = aircraft_mass * GRAVITATIONAL_ACCELERATION
-    d_LD_ratio = f_lift_to_drag_ratio(d_polar)
-    engine_air_volume = f_airflow(aircraft_speed, wing_front_square)
-    # Словарь для вывода данных:
-    d_flight = {}
-    # Приборная панель:
-    # Добавь данные о массе аппарата. Ведь всё относительно в мире том.
-    d_glide = {
-            'engine_air_volume':engine_air_volume,
-            'aircraft_speed':aircraft_speed,
-            'climb_speed':0,
-            'altitude':altitude,
-            'path':0,
-            'second':0,
-            }
-    energy_balance = ENERGY_BALANCE_MJ
-    # Пока что считаем цикл по секундам, а надо бы по доступной энергии, скорости и высоте:
-    while d_glide['second'] < MAXIMUM_SECOND:
-        # Берём данные из словаря:
-        second = d_glide['second']
-        aircraft_speed = d_glide['aircraft_speed']
-        climb_speed = d_glide['climb_speed']
-        altitude = d_glide['altitude']
-        path = d_glide['path']
-        # Автопилот (пока не работает):
+# Пикирование. Нужно целиком переписать.
+#def f_diving (grav_force, lift_force, drag_force,
+#        aircraft_mass, aircraft_speed, angle_of_attack, climb_speed):
+#    """Пикирование.
+#
+#    Угол атаки отрицательный, подъёмная сила превращается в силу антикрыла.
+#    По этой же причине вектор прижимающей силы отклоняется вперёд.
+#    Доля прижимающей силы (синус угла атаки) переходит в силу тяги.
+#    Аппарат платит набранной высотой за быстрое повышение скорости.
+#    """
+#    descent_force = -grav_force + lift_force
+#    descent_acceleration = descent_force / aircraft_mass
+#    # Скорость снижения минусовая:
+#    descent_speed = climb_speed + descent_acceleration
+#    print('climb_speed',descent_speed, descent_force)
+#    # Крыло скользит по воздуху под углом, поэтому вектор силы реакции опоры отклоняется вперёд.
+#    # Часть силы притяжения и давления воздуха на крыло переходит в силу тяги:
+#    incline_force = abs(descent_force * math.sin(math.radians(angle_of_attack)))
+#    incline_force = incline_force - drag_force
+#    incline_acceleration = incline_force / aircraft_mass
+#    aircraft_speed = aircraft_speed + incline_acceleration
+#    #print(descent_force,incline_force,descent_acceleration,incline_acceleration)
+#    # Вектор скорости летательного аппарата направлен под углом к земле:
+#    descent_rate = descent_speed + f_triangle(aircraft_speed, angle_of_attack, 90)
+#    return aircraft_speed, descent_speed, descent_rate
+
+def f_glide_model (d_flight, d_LD_ratio, silent=False, energy_collect=False):
+    """Модель взлёта, полёта и планирования.
+    
+    1) В первом словаре модель получает данные для полёта:
+    Массу аппарата, начальную скорость и высоту, запас энергии.
+    2) Во втором словаре данные аэродинамического качества углов атаки:
+    Используя эти сведения автопилот выбирает для полёта оптимальные углы.
+    3) Затем вычисляются аэродинамические коэффициенты и площади проекций:
+    Как фронтальной, так и горизонтальной (для расчёта взлёта/сваливания)
+    4) В зависимости от высоты и угла атаки выбирается одна из функций:
+    Разгон по взлётной полосе, набор высоты, планирование.
+    5) Полётные данные пополняются и снова передаются автопилоту.
+    6) Модель работает с ограничением по времени или до приземления.
+    """
+    d_flight_log = {}
+    while d_flight['altitude'] >=0 and d_flight['second'] <= MAX_SECONDS:
+        # Автопилот выбирает угол атаки и режим двигателя:
         optimum_angle, engine_thrust, engine_required_energy = \
-                f_pegasus_mind(d_glide, d_LD_ratio, aircraft_mass, energy_balance)
-        #print(optimum_angle,engine_thrust,engine_required_energy)
-        # Данные по фронтальной проекции:
-        total_front_square, wing_front_square, \
-                wing_lift_coefficient, total_drag = f_aerodynamic(optimum_angle)
-        # Данные по горизонтальной проекции:
-        # Проблема, в пикировании эта проекция становится фронтальной.
-        horizontal_projection_angle = f_take_closest(90 - optimum_angle, d_polar.keys())
-        total_bottom_square, wing_bottom_square, \
-                wing_bottom_lift_coefficient, total_bottom_drag = \
-                f_aerodynamic(horizontal_projection_angle)
-        #print(horizontal_projection_angle,total_bottom_drag,wing_bottom_square,
-        #        wing_bottom_lift_coefficient,total_bottom_drag)
-        # Вычисляем секундное ускорение:
-        jet_acceleration = engine_thrust / aircraft_mass
-        aircraft_speed = aircraft_speed + jet_acceleration
-        # Вычисляем объём рабочего вещества для ВРД:
-        engine_air_volume = f_airflow(aircraft_speed, wing_front_square)
-        # Считаем подъёмную силу и сопротивление воздуха:
-        drag_force = f_drag_force(total_drag,AIR_DENSITY,aircraft_speed,total_front_square)
-        lift_force = f_drag_force(wing_lift_coefficient,AIR_DENSITY,aircraft_speed,WING_SQUARE)
-        lift_force_kilogram = lift_force / GRAVITATIONAL_ACCELERATION
-        # Сопротивление воздуха замедляет сваливание и набор высоты:
-        horizontal_drag_force = f_drag_force(total_bottom_drag,AIR_DENSITY,climb_speed,total_bottom_square)
-        if climb_speed != 0:
-            horizontal_drag_deceleration = horizontal_drag_force / aircraft_mass
-            if climb_speed > 0:
-                climb_speed = climb_speed - horizontal_drag_deceleration
-            else:
-                climb_speed = climb_speed + horizontal_drag_deceleration
-            # Крылья отлично держат пегаса, не хуже чем вингсьют.
-            print(climb_speed, horizontal_drag_deceleration, horizontal_drag_force)
+                f_pegasus_mind(d_flight, d_LD_ratio)
+        # Если энергия закончилась, никто никуда не летит:
+        if d_flight['energy_balance'] < engine_required_energy:
+            engine_required_energy = 0
+            engine_thrust = 0
+        # Если угол изменился пересчитываются аэродинамические качества аппарата:
+        if optimum_angle != d_flight['angle_of_attack']:
+            d_plane = f_create_dict_plane(optimum_angle)
+            d_flight['angle_of_attack'] = optimum_angle
         # Качение по земле:
-        if altitude == 0 and climb_speed == 0 and lift_force < grav_force:
-            aircraft_speed = f_rolling(grav_force, lift_force, drag_force,
-                    aircraft_mass, aircraft_speed)
+        if d_flight['altitude'] == 0 and d_flight['climb_speed'] == 0:
+            aircraft_speed, climb_speed, climb_rate = \
+                    f_rolling(engine_thrust, d_plane, d_flight)
             distance = aircraft_speed
-            climb_rate = 0
         # Набор высоты:
-        elif angle_of_attack > 0 and lift_force > grav_force:
-            aircraft_speed, climb_speed, climb_rate = f_climbing(grav_force, lift_force, drag_force,
-                    aircraft_mass, aircraft_speed, angle_of_attack, climb_speed)
+        elif d_flight['angle_of_attack'] > 0 \
+                and d_flight['altitude'] > 0:
+            aircraft_speed, climb_speed, climb_rate = \
+                    f_climbing(engine_thrust, d_plane, d_flight)
             # Скорость, это векторная величина,
             # А расстояние по горизонтали -- соседняя сторона треугольника:
             distance = f_triangle(aircraft_speed, 90 - angle_of_attack, 90)
-        # Сваливание:
-        elif angle_of_attack > 0 and lift_force < grav_force and lift_force > 0:
-            aircraft_speed, climb_speed, climb_rate = f_descenting(grav_force, lift_force, drag_force,
-                    aircraft_mass, aircraft_speed, angle_of_attack, climb_speed)
-            distance = f_triangle(aircraft_speed, 90 - angle_of_attack, 90)
-        ## Пикирование:
-        elif angle_of_attack < 0 and lift_force < grav_force:
-            aircraft_speed, climb_speed, climb_rate = f_diving(grav_force, lift_force, drag_force,
-                    aircraft_mass, aircraft_speed, angle_of_attack, climb_speed)
-            distance = f_triangle(aircraft_speed, 90 - angle_of_attack, 90)
-        ## Планирование:
-        elif angle_of_attack < 0 and lift_force > grav_force:
-            aircraft_speed, climb_speed, climb_rate = f_gliding(grav_force, lift_force, drag_force,
-                    aircraft_mass, aircraft_speed, angle_of_attack, climb_speed)
-            distance = f_triangle(aircraft_speed, 90 - angle_of_attack, 90)
+        # Планирование:
+        elif d_flight['angle_of_attack'] < 0 \
+                and d_flight['altitude'] > 0:
+            aircraft_speed, climb_speed, climb_rate = \
+                    f_gliding(engine_thrust, d_plane, d_flight)
+            # Скорость, это векторная величина,
+            # А расстояние по горизонтали -- соседняя сторона треугольника:
+            distance = f_triangle(aircraft_speed, 90 - abs(angle_of_attack), 90)
+        # Пикирование:
+            # Нужно переписать.
         else:
             print('Что-то пошло не так. glide_model')
-            #print(lift_force, drag_force, lift_force_kilogram)
-        # Считаем модель пока пони не приземлится или не остановится.
-        if d_glide['altitude'] < 0:
-            print('Приземление')
-            break
-        elif aircraft_speed <= 0:
-            print('Остановка')
-            break
-        # Добавляем данные в словарь:
-        d_glide['engine_air_volume'] = engine_air_volume
-        d_glide['aircraft_speed'] = aircraft_speed
-        d_glide['climb_speed'] = climb_speed
-        d_glide['altitude'] = d_glide['altitude'] + climb_rate
-        d_glide['path'] = d_glide['path'] + distance
-        # Переходим к следующему циклу:
-        d_glide['second'] += 1
-        # Данные сохраняются для вывода:
-        speed_kilometre_hour = aircraft_speed * 3.6
+            exit()
+        # Вычисляем объём рабочего вещества для ВРД и пополнение энергии:
+        engine_air_volume = f_airflow(aircraft_speed, d_plane['wing_front_square'])
+        if energy_collect is True:
+            energy_collection = engine_air_volume * AIR_MAGIC_ENERGY_MJ
+            d_flight['energy_balance'] += energy_collection
+        # Дополняем словарь:
+        d_flight['aircraft_speed'] = aircraft_speed
+        d_flight['climb_speed'] = climb_speed
+        d_flight['engine_air_volume'] = engine_air_volume
+        d_flight['energy_balance'] -= engine_required_energy
+        d_flight['altitude'] += climb_rate
+        d_flight['path'] += distance
+        d_flight['second'] += 1
+        # Запись лога:
+        d_flight_log[d_flight['second']] = d_flight
         if silent is not True:
-            print(round(aircraft_speed),round(path),round(altitude),round(engine_required_energy * 1000), 'kWt')
-        d_flight[second] = (speed_kilometre_hour, drag_force, lift_force_kilogram,
-                second, path, altitude)
-    # В вывод идут данные цикла до момента сваливания.
-    # Ну и зачем нужен этот вывод?
-    if d_flight:
-        glide_output = d_flight[len(d_flight) - 1]
-        return glide_output
-
+            print(d_flight['second'], round(d_flight['aircraft_speed']),
+                    round(d_flight['path']), round(d_flight['altitude']),
+                    round(engine_required_energy * 1000), 'kW')
+    return d_flight_log
+        
 def f_lift_to_drag_ratio (d_polar):
     """Аэродинамическое качество, это Cy/Cx (Cl/Cd)
     
@@ -1160,7 +1201,7 @@ def f_acceleration_estimate (speed, distance):
     acceleration = (speed ** 2) / distance / 2
     return acceleration
 
-def f_autopilot_takeoff (d_glide, d_LD_ratio, aircraft_mass, energy_balance):
+def f_autopilot_takeoff (d_flight, d_LD_ratio, aircraft_mass, energy_balance):
     """Процедура взлёта.
 
     1) Автопилот выбирает оптимальный угол атаки по аэродинамическому качеству.
@@ -1169,8 +1210,8 @@ def f_autopilot_takeoff (d_glide, d_LD_ratio, aircraft_mass, energy_balance):
     4) По ускорению и аэродинамическому качеству определяется необходимая тяга.
     5) Наконец, выбирается оптимальный режим двигателя (простым перебором).
     """
-    engine_air_volume = d_glide['engine_air_volume']
-    aircraft_speed = d_glide['aircraft_speed']
+    engine_air_volume = d_flight['engine_air_volume']
+    aircraft_speed = d_flight['aircraft_speed']
     optimum_angle = max(d_LD_ratio.keys(), key=(lambda k: d_LD_ratio[k]))
     optimum_speed = f_find_optimum_speed_for_angle(aircraft_mass, optimum_angle)
     optimum_acceleration = f_acceleration_estimate(optimum_speed, RUNWAY_LENGTH)
@@ -1200,21 +1241,25 @@ def f_autopilot_takeoff (d_glide, d_LD_ratio, aircraft_mass, energy_balance):
         #print('Что-то пошло не так. f_autopilot_takeoff:')
         return optimum_angle, 0, 0
 
-def f_pegasus_mind (d_glide, d_LD_ratio, aircraft_mass, energy_balance):
+def f_pegasus_mind (d_flight, d_LD_ratio):
+    # Переписывай, словарик лучше кучи переменных. Записи лишь чуть длиннее, зато всё сгруппировано.
     # Потихоньку пишем пегасий ИИ. Он должен передавать команды крыльям и движку.
-    second = d_glide['second']
-    engine_air_volume = d_glide['engine_air_volume']
-    aircraft_speed = d_glide['aircraft_speed']
-    climb_speed = d_glide['climb_speed']
-    altitude = d_glide['altitude']
-    path = d_glide['path']
+    energy_balance = d_flight['energy_balance']
+    aircraft_mass = d_flight['aircraft_mass']
+    engine_air_volume = d_flight['engine_air_volume']
+    aircraft_speed = d_flight['aircraft_speed']
+    climb_speed = d_flight['climb_speed']
+    second = d_flight['second']
+    path = d_flight['path']
+    altitude = d_flight['altitude']
+    #print(aircraft_speed, path, altitude)
     # Взлёт:
     if altitude == 0:
         optimum_angle, engine_thrust, engine_required_energy = \
-                f_autopilot_takeoff(d_glide, d_LD_ratio, aircraft_mass, energy_balance)
+                f_autopilot_takeoff(d_flight, d_LD_ratio, aircraft_mass, energy_balance)
         return optimum_angle, engine_thrust, engine_required_energy
     # Полёт с набором высоты:
-    elif 0 < altitude < 1000 and climb_speed > 0:
+    elif 0 < altitude < MAX_ALTITUDE / 2 and climb_speed > 0:
         # А вот и нет, здесь оптимальный угол уже ищется по лобовому сопротивлению.
         # Но сразу не выбирается, чтобы подъёмная сила не упала.
         optimum_angle = max(d_LD_ratio.keys(), key=(lambda k: d_LD_ratio[k]))
@@ -1228,29 +1273,27 @@ def f_pegasus_mind (d_glide, d_LD_ratio, aircraft_mass, energy_balance):
         if aircraft_speed >= optimum_speed:
             #print('off')
             return optimum_angle, 0, 0
-    elif 0 < altitude < 1000 and climb_speed < 0:
-    # Боремся со сваливанием:
-    # Нужно считать скорость сваливания и расстояние до земли, а потом выбирать оптимальную тягу.
-    # Сейчас проблема не в автопилоте, а в самом процессе сваливания.
-    # Сопротивление воздуха учитывается только для фронтальной проекции.
-        optimum_angle = max(d_LD_ratio.keys(), key=(lambda k: d_LD_ratio[k]))
-        engine_mode = 'maximal'
-        #print(engine_mode, climb_speed)
-        engine_thrust, engine_required_energy, engine_overheating = \
-                f_engine_control(engine_mode, START_AIR_VOLUME)
-        return optimum_angle, engine_thrust, engine_required_energy
-
-    # Планирование:
-    elif altitude > 1000:
-        #print('off')
-        optimum_angle = max(d_LD_ratio.keys(), key=(lambda k: d_LD_ratio[k]))
-        return optimum_angle, 0, 0
-
-
-
+    # Набор скорости:
+    elif 100 < altitude < MAX_ALTITUDE:
+        # Угол с минимальным лобовым сопротивлением крыла:
+        optimum_angle = min(d_polar.keys(), key=(lambda k: d_polar[k][1]))
+        optimum_speed = f_find_optimum_speed_for_angle(aircraft_mass, optimum_angle)
+        if aircraft_speed < optimum_speed:
+            required_thrust = (aircraft_mass * GRAVITATIONAL_ACCELERATION) / d_LD_ratio[optimum_angle]
+            engine_thrust, engine_required_energy, engine_overheating, engine_mode = \
+                    f_engine_mode_choice (required_thrust, engine_air_volume)
+            #print(engine_mode)
+            return optimum_angle, engine_thrust, engine_required_energy
+        if aircraft_speed >= optimum_speed:
+            #print('off')
+            return optimum_angle, 0, 0
+    # Планирование
+    #elif altitude > 1000:
+    #    optimum_angle = f_take_closest(-3, d_polar.keys())
+    #    return optimum_angle, 0, 0
     else:
-        print('Автопилот не умеет летать.')
-        optimum_angle = max(d_LD_ratio.keys(), key=(lambda k: d_LD_ratio[k]))
+        optimum_angle = f_take_closest(-3, d_polar.keys())
+        #print('Автопилот не умеет летать.')
         return optimum_angle, 0, 0
 
 
@@ -1440,7 +1483,7 @@ if namespace.angle:
     angle_of_attack = f_take_closest(namespace.angle, d_polar.keys())
     print('Выбрано:', angle_of_attack)
 else:
-    # Если нет, мспользовать угол с минимальный лобовымм сопротивлением:
+    # Если нет, использовать угол с минимальный лобовым сопротивлением:
     angle_of_attack = min(d_polar.keys(), key=(lambda k: d_polar[k][1]))
 
 # Проверка, указан ли вес груза:
@@ -1454,6 +1497,19 @@ if namespace.speed:
     aircraft_speed = namespace.speed
 else:
     aircraft_speed = 0
+
+# Исходные данные для функции полёта:
+d_flight = {
+        'aircraft_mass':aircraft_mass,
+        'aircraft_speed':aircraft_speed,
+        'angle_of_attack':angle_of_attack,
+        'energy_balance':ENERGY_BALANCE_MJ,
+        'engine_air_volume':AIR_VOLUME,
+        'climb_speed':0,
+        'second':0,
+        'path':0,
+        'altitude':0,
+        }
 
 #-------------------------------------------------------------------------
 # Тело программы:
@@ -1491,44 +1547,6 @@ elif namespace.model is True:
         print('Время, путь, высота, циклы двигателя, между циклами (секунд)')
         print(flight_output[3:8])
 else:
-    # В ином случае моделируем взлёт с оптимальным (или указанным) углом атаки:
-    # Это не нужно, пегас сам выбирает угол атаки:
-    # А стоило бы научить его слушаться команды.
-    if namespace.angle is None:
-        # Поиск угла с лучшим аэродинамическим качеством:
-        d_LD_ratio = f_lift_to_drag_ratio(d_polar)
-        optimum_angle = max(d_LD_ratio.keys(), key=(lambda k: d_LD_ratio[k]))
-        angle_of_attack = optimum_angle
-        print('Взлёт с углом атаки:',optimum_angle)
-    else:
-        print('Взлёт')
-    # Хау, теперь осталось только добавить плавный разгон.
-    # Один цикл двигателя:
-    #max_engine_thrust, working_mass, reactive_speed = f_engine(AIR_VOLUME, WORKING_MASS_ENERGY_MJ)[0:3]
-    # Пегас набирает предельную скорость за одну секунду (на самом деле очень крутой пегас):
-    #aircraft_acceleration = max_engine_thrust / aircraft_mass
-    # А вообще, здесь надо бы поставить ускорение и длину взлётной полосы.
-    #aircraft_speed = aircraft_acceleration
-    # Пегас взлетает и падает:
+    # В ином случае пегас взлетает и пока не кончится энрегия куда-то летит:
     print('Скорость (м/с), путь, высота, мощность (кВт)')
-    glide_output = f_glide_model(aircraft_mass, aircraft_speed, angle_of_attack)
-    ## Избавлемся от чисел после запятой:
-    glide_output = [round(i) for i in glide_output]
-    print('Скорость (км/ч), лобовое сопротивление (ньютонов), подъёмная сила (кгс)')
-    print(glide_output[0:3])
-    print('Время, путь, высота')
-    print(glide_output[3:8])
-
-# Мимолётные вычисления:
-#print(f_aerodynamic(90))
- #aerodynamic_output = (total_front_square, wing_front_square, wing_lift_coefficient, total_drag)
-
-#print(f_reynolds_number(100/3.6,0.35))
-#print(f_reynolds_number(200/3.6,0.35))
-
-#print(f_engine(1.4, WORKING_MASS_ENERGY_MJ))
-#print(f_engine(2.8, WORKING_MASS_ENERGY_MJ))
-#print(f_engine(4.62, WORKING_MASS_ENERGY_MJ))
-
-#print(f_reynolds_number (24, 0.35))
-#print(f_reynolds_number (48, 0.35))
+    f_glide_model(d_flight, d_LD_ratio)
