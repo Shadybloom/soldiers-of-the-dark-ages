@@ -907,6 +907,10 @@ def create_parser():
                         action='store', dest='speed', type=int,
                         help='Постоянная скорость (км/час)'
                         )
+    parser.add_argument('-S', '--seconds',
+                        action='store', dest='seconds', type=int,
+                        help='Число циклов модели (секунд)'
+                        )
     parser.add_argument('-w', '--weight',
                         action='store', dest='weight', type=int,
                         help='Полезная нагрузка (кг)'
@@ -1481,7 +1485,7 @@ def f_glide_model (d_flight, d_LD_ratio, silent=False, energy_collect=False):
     """
     d_flight_log = {}
     d_plane = f_create_dict_plane(d_flight['angle_of_attack'])
-    while d_flight['altitude'] >=0 and d_flight['second'] <= MAX_SECONDS:
+    while d_flight['altitude'] >=0 and d_flight['second'] <= max_seconds:
         # Автопилот выбирает угол атаки и режим двигателя:
         optimum_angle, engine_thrust, engine_required_energy = \
                 f_pegasus_mind(d_flight, d_plane, d_LD_ratio)
@@ -1895,6 +1899,12 @@ if namespace.speed:
 else:
     aircraft_speed = 0
     fixed_speed = None
+
+# Проверка, указано ли время:
+if namespace.seconds:
+    max_seconds = namespace.seconds
+else:
+    max_seconds = MAX_SECONDS
 
 # Исходные данные для функции полёта:
 d_flight = {
