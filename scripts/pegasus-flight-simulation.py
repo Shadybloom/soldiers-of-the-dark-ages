@@ -22,6 +22,7 @@ import re
 #-------------------------------------------------------------------------
 # Известные баги:
 
+# * Экранолёт не умеет пикировать. Потому что никто не умеет пикировать. f_gliding, lift_force < 0
 # * Воздухозаборники должны сжимать воздух. Преобразование динамического давления в статическое.
     # * При этом скорость потока воздуха замедляется, нужно учесть это в f_jet_force.
 # * С пикированием проблемы. Скорость падает, потому что площадь фронтальной проекции растёт.
@@ -1397,7 +1398,8 @@ def f_gliding (engine_thrust, d_plane, d_flight):
             )
     grav_force = -(d_flight['aircraft_mass'] * GRAVITATIONAL_ACCELERATION)
     # Вектор прижимаюещей силы направлен вперёд, поэтому часть её переходит в тягу.
-    incline_force = lift_force * abs(math.sin(math.radians(angle_of_attack)))
+    # Поскольку пикирование не допилено, lift_force крыла и антикрыла считаются одинаково положительными:
+    incline_force = abs(lift_force * math.sin(math.radians(angle_of_attack)))
     # Подъёмная сила может быть как положительной так и отрицательной:
     climb_force = lift_force + grav_force
     climb_acceleration = climb_force / aircraft_mass
