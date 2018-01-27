@@ -6,7 +6,7 @@
 
 ## Карта
 
-![Операция Циклон, карта третья](http://storage1.static.itmages.ru/i/17/0525/h_1495730630_7236263_bafeefb08e.png)
+![Операция Циклон, карта третья](/images/maps/operation-cyclone-map-3.png)
 
 ## Настоящее. 11:50 01-04-82 года, 16 дней с начала операции «Исход».
 
@@ -204,7 +204,7 @@
 
 ## Схема боя
 
-![Диспозиция в обороне сопок](http://storage9.static.itmages.ru/i/18/0115/h_1516000928_1704397_be5c4dc8f9.png)
+![Диспозиция в обороне сопок](/images/maps/operation-map-3-scheme-clear.png)
 
 ### 12:50
 
@@ -344,7 +344,7 @@
 
 ## Схема боя
 
-![Первый план обороны сопок](http://storage1.static.itmages.ru/i/18/0115/h_1516010328_7756682_dde09b0831.png)
+![Первый план обороны сопок](/images/maps/operation-map-3-scheme-act-1-bluefor.png)
 
 ### 13:40?
 
@@ -520,7 +520,7 @@
 
 ## Схема боя
 
-![Итог первого боя](http://storage2.static.itmages.ru/i/18/0115/h_1516010329_8996620_9fbb7a24fe.png)
+![Итог первого боя](/images/maps/operation-map-3-scheme-act-1-opfor.png)
 
 ### 13:00?
 
@@ -588,7 +588,7 @@
 
 ## Схема боя
 
-![Второй план обороны сопок](http://storage8.static.itmages.ru/i/18/0115/h_1516019159_4780522_658a9560bc.png)
+![Второй план обороны сопок](/images/maps/operation-map-3-scheme-act-2-bluefor.png)
 
 ### 13:40?
 
@@ -724,7 +724,7 @@
 
 ## Схема боя
 
-![Итог второго боя](http://storage1.static.itmages.ru/i/18/0115/h_1516019176_7954740_900671280b.png)
+![Итог второго боя](/images/maps/operation-map-3-scheme-act-2-opfor.png)
 
 ### 13:00?
 
@@ -810,7 +810,7 @@
 
 ## Схема боя
 
-![Третий план обороны сопок](http://storage8.static.itmages.ru/i/18/0115/h_1516022292_4989609_c7d7b5c1a4.png)
+![Третий план обороны сопок](/images/maps/operation-map-3-scheme-act-3-bluefor.png)
 
 ### 14:00?
 
@@ -942,7 +942,7 @@
 
 ## Схема боя
 
-![Итог третьего боя](http://storage9.static.itmages.ru/i/18/0115/h_1516022295_4813767_85cf754e2a.png)
+![Итог третьего боя](/images/maps/operation-map-3-scheme-act-3-opfor.png)
 
 ### 13:00
 
@@ -1078,7 +1078,7 @@
 
 ## Схема боя
 
-![Четвёртый и последний план обороны сопок](http://storage1.static.itmages.ru/i/18/0115/h_1516024300_6326860_d70307ceed.png)
+![Четвёртый и последний план обороны сопок](/images/maps/operation-map-2-scheme-act-4-bluefor.png)
 
 ### 13:50
 
