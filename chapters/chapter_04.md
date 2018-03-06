@@ -888,10 +888,12 @@
 
 В армии не любят выскочек, знаете ли? Впрочем, солдаты терпят, медицина тоже нужна.
 
-_Лёгкое оружие — 19%_  
+_Тактика — 24%_  
 _Первая помощь — 60%_  
 
 ## Ссылки
 
 Дополнительные материалы:  
-[Штурмовые инженеры: задачи, тактика, вооружение](https://github.com/Shadybloom/soldiers-of-the-dark-ages/blob/master/research/equestria_assault_engineers.md)
+[Штурмовые инженеры: задачи, тактика, вооружение](https://github.com/Shadybloom/soldiers-of-the-dark-ages/blob/master/research/equestria_assault_engineers.md)  
+[Силы Эквестрии в операции «Циклон»](/research/operation_cyclone_bluefor.md)  
+[Войска полосатых в операции «Циклон»](/research/operation_cyclone_opfor.md)  
