@@ -450,7 +450,7 @@
 
 ## Схема боя
 
-![Операция Утконос, схема боя, наступление](/images/maps/operation-platypus-map-1-scheme-act-1-bluefor.png)
+![Операция Утконос, схема боя, наступление штурмовиков](/images/maps/operation-platypus-map-1-scheme-act-1-bluefor.png)
 
 ### 7:00
 
