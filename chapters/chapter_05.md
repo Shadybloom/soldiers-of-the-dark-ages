@@ -204,7 +204,7 @@
 
 ## Схема боя
 
-![Диспозиция в обороне сопок](/images/maps/operation-map-3-scheme-clear.png)
+![Диспозиция в обороне сопок](/images/maps/operation-map-3-scheme-recon.png)
 
 ### 12:50
 
